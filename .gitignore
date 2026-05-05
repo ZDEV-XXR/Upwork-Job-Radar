@@ -1,0 +1,9 @@
+# Project specific
+demo/
+# Chrome Extension specific
+*.pem
+.DS_Store
+node_modules/
+
+# OS generated files
+Thumbs.db

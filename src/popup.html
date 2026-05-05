@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { width: 300px;  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .status { font-size: 0.8em; margin-bottom: 10px; }
+        .logged-in { color: green; }
+        .logged-out { color: red; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; margin-bottom: 10px; }
+        button { width: 100%; padding: 10px; background: #14a800; color: white; border: none; cursor: pointer; border-radius: 5px; }
+        .keyword-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    margin: 4px 0;
+    background: #f9f9f9;
+    border-radius: 4px;
+    border: 1px solid #eee;
+  }
+        .keyword-text {
+    flex-grow: 1;
+    font-size: 14px;
+    color: #333;
+    /* Prevents long keywords from breaking the layout */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .delete-btn {
+    background: #ff4d4d;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    /* Explicitly small dimensions */
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0; /* Prevents button from squishing */
+    margin-left: 10px;
+  }
+
+  .delete-btn:hover { background: #d93636; }
+
+  .section-title { font-weight: bold; margin: 10px 0; color: #555; font-size: 13px; }
+  .recent-item {
+    position: relative;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #ffffff;
+    border-radius: 6px;
+    border: 1px solid #e0e0e0;
+    border-left: 4px solid #14a800;
+    cursor: pointer; /* Shows the hand icon for the whole card */
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+  .recent-item:hover {
+    background: #f9fff9;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  }
+
+  .recent-item:active {
+    transform: scale(0.98); /* Slight "press" effect when clicked */
+  }
+
+  .job-time { font-size: 10px; color: #888; display: block; }
+
+  .clear-job-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #f0f0f0; /* Light gray background so it's easy to see */
+    color: #666;
+    border: none;
+    border-radius: 50%; /* Circular button */
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  .clear-job-btn:hover {
+    background: #ff4d4d;
+    color: white;
+  }
+
+  .job-title {
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 2px;
+    padding-right: 25px; /* Leave space so text doesn't overlap the X */
+  }
+
+  .job-time {
+    font-size: 11px;
+    color: #666;
+  }
+    </style>
+</head>
+<body>
+    <h3>Upwork Radar</h3>
+    
+    <div id="auth-status" class="status">Checking connection...</div>
+    <input type="text" id="keyword-input" placeholder="Add keyword (e.g. React Developer)">
+    <div id="auth-status" class="status">Checking connection...</div>
+
+    <!-- New Login Button -->
+    <button id="login-btn" style="display: none; background-color: #ff4b2b; margin-bottom: 10px;">
+    Open Upwork & Log In
+    </button>
+
+    <div class="timer-container" style="padding: 10px; text-align: center; background: #f4f4f4; border-radius: 8px; margin-top: 10px;">
+    <span style="font-size: 0.8rem; color: #666;">Next Scan In:</span>
+    <div id="countdown" style="font-weight: bold; color: #14a800; font-size: 1.2rem;">--:--</div>
+    </div>
+
+    <button id="add-btn">Add Keyword</button>
+    <div id="keywordList"></div>
+    <hr>
+
+    <div class="section-title">Latest Matches</div>
+    <div id="recentJobsList"></div>
+    <script src="popup.js"></script>
+</body>
+</html>
