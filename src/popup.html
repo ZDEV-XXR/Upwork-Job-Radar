@@ -1,137 +1,265 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style>
-        body { width: 300px;  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .status { font-size: 0.8em; margin-bottom: 10px; }
-        .logged-in { color: green; }
-        .logged-out { color: red; }
-        input { width: 100%; padding: 8px; box-sizing: border-box; margin-bottom: 10px; }
-        button { width: 100%; padding: 10px; background: #14a800; color: white; border: none; cursor: pointer; border-radius: 5px; }
-        .keyword-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px;
-    margin: 4px 0;
-    background: #f9f9f9;
-    border-radius: 4px;
-    border: 1px solid #eee;
-  }
-        .keyword-text {
-    flex-grow: 1;
-    font-size: 14px;
-    color: #333;
-    /* Prevents long keywords from breaking the layout */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  .delete-btn {
-    background: #ff4d4d;
-    color: white;
-    border: none;
-    border-radius: 3px;
-    /* Explicitly small dimensions */
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    font-size: 12px;
-    font-weight: bold;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0; /* Prevents button from squishing */
-    margin-left: 10px;
-  }
+    body {
+      width: 300px;
+      padding: 14px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-size: 13px;
+      color: #222;
+      background: #fff;
+    }
 
-  .delete-btn:hover { background: #d93636; }
+    h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #14a800;
+      margin-bottom: 10px;
+    }
 
-  .section-title { font-weight: bold; margin: 10px 0; color: #555; font-size: 13px; }
-  .recent-item {
-    position: relative;
-    padding: 12px;
-    margin-bottom: 8px;
-    background: #ffffff;
-    border-radius: 6px;
-    border: 1px solid #e0e0e0;
-    border-left: 4px solid #14a800;
-    cursor: pointer; /* Shows the hand icon for the whole card */
-    transition: transform 0.1s, box-shadow 0.1s;
-  }
-  .recent-item:hover {
-    background: #f9fff9;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  }
+    /* ── Status bar ── */
+    #auth-status {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 5px;
+      margin-bottom: 10px;
+      background: #f4f4f4;
+    }
+    #auth-status.logged-in  { color: #14a800; background: #f0fff0; }
+    #auth-status.logged-out { color: #cc0000; background: #fff0f0; }
+    #auth-status.checking   { color: #777;    background: #f4f4f4; }
 
-  .recent-item:active {
-    transform: scale(0.98); /* Slight "press" effect when clicked */
-  }
+    /* ── Timer ── */
+    .timer-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #f4f4f4;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    .timer-label { font-size: 11px; color: #666; }
+    #countdown   { font-weight: 700; color: #14a800; font-size: 15px; }
 
-  .job-time { font-size: 10px; color: #888; display: block; }
+    /* ── Scan now button ── */
+    #scan-now-btn {
+      font-size: 11px;
+      padding: 4px 10px;
+      background: #14a800;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      width: auto;
+    }
+    #scan-now-btn:hover { background: #0f8500; }
 
-  .clear-job-btn {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    background: #f0f0f0; /* Light gray background so it's easy to see */
-    color: #666;
-    border: none;
-    border-radius: 50%; /* Circular button */
-    width: 20px;
-    height: 20px;
-    font-size: 10px;
-    font-weight: bold;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-  }
+    /* ── Input + add ── */
+    #keyword-input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    #keyword-input:focus { outline: none; border-color: #14a800; }
 
-  .clear-job-btn:hover {
-    background: #ff4d4d;
-    color: white;
-  }
+    button { cursor: pointer; }
 
-  .job-title {
-    font-weight: bold;
-    font-size: 14px;
-    margin-bottom: 2px;
-    padding-right: 25px; /* Leave space so text doesn't overlap the X */
-  }
+    #add-btn {
+      width: 100%;
+      padding: 9px;
+      background: #14a800;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+    #add-btn:hover { background: #0f8500; }
 
-  .job-time {
-    font-size: 11px;
-    color: #666;
-  }
-    </style>
+    #login-btn {
+      width: 100%;
+      padding: 9px;
+      background: #ff4b2b;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      display: none;
+    }
+    #login-btn:hover { background: #d93a1e; }
+
+    /* ── Keyword list ── */
+    #keywordList { margin-bottom: 10px; }
+
+    .keyword-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      margin: 4px 0;
+      background: #f9f9f9;
+      border: 1px solid #eee;
+      border-radius: 5px;
+    }
+    .keyword-text {
+      flex-grow: 1;
+      font-size: 13px;
+      color: #333;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .delete-btn {
+      flex-shrink: 0;
+      margin-left: 8px;
+      width: 22px;
+      height: 22px;
+      background: #ff4d4d;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .delete-btn:hover { background: #d93636; }
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid #eee; margin: 10px 0; }
+
+    /* ── Recent jobs ── */
+    .section-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 8px;
+    }
+
+    .no-jobs { font-size: 12px; color: #999; text-align: center; padding: 10px 0; }
+
+    .recent-item {
+      position: relative;
+      padding: 10px 12px;
+      margin-bottom: 7px;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-left: 4px solid #14a800;
+      border-radius: 0 6px 6px 0;
+      cursor: pointer;
+      transition: box-shadow .15s;
+    }
+    .recent-item:hover  { box-shadow: 0 2px 6px rgba(0,0,0,.1); background: #f9fff9; }
+    .recent-item:active { transform: scale(0.98); }
+
+    .job-title {
+      font-weight: 600;
+      font-size: 13px;
+      padding-right: 22px;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #111;
+    }
+    .job-meta {
+      font-size: 11px;
+      color: #888;
+    }
+    .job-keyword {
+      display: inline-block;
+      background: #e8f5e2;
+      color: #14a800;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+
+    .clear-job-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 18px;
+      height: 18px;
+      background: #eee;
+      color: #666;
+      border: none;
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .clear-job-btn:hover { background: #ff4d4d; color: #fff; }
+  </style>
 </head>
 <body>
-    <h3>Upwork Radar</h3>
-    
-    <div id="auth-status" class="status">Checking connection...</div>
-    <input type="text" id="keyword-input" placeholder="Add keyword (e.g. React Developer)">
-    <div id="auth-status" class="status">Checking connection...</div>
 
-    <!-- New Login Button -->
-    <button id="login-btn" style="display: none; background-color: #ff4b2b; margin-bottom: 10px;">
-    Open Upwork & Log In
-    </button>
+  <h3>⚡ Upwork Radar</h3>
 
-    <div class="timer-container" style="padding: 10px; text-align: center; background: #f4f4f4; border-radius: 8px; margin-top: 10px;">
-    <span style="font-size: 0.8rem; color: #666;">Next Scan In:</span>
-    <div id="countdown" style="font-weight: bold; color: #14a800; font-size: 1.2rem;">--:--</div>
+  <div id="auth-status" class="checking">Checking login...</div>
+
+  <button id="login-btn">🔑 Open Upwork &amp; Log In</button>
+
+  <div class="timer-box">
+    <div>
+      <div class="timer-label">Next scan in</div>
+      <div id="countdown">--:--</div>
     </div>
+    <button id="scan-now-btn">Scan now</button>
+  </div>
 
-    <button id="add-btn">Add Keyword</button>
-    <div id="keywordList"></div>
-    <hr>
+  <input type="text" id="keyword-input" placeholder="Add keyword (e.g. React Developer)">
+  <button id="add-btn">+ Add Keyword</button>
 
-    <div class="section-title">Latest Matches</div>
-    <div id="recentJobsList"></div>
-    <script src="popup.js"></script>
+  <div id="keywordList"></div>
+
+  <hr>
+
+  <div class="section-title">Latest Matches</div>
+  <div id="recentJobsList"></div>
+
+  <script src="popup.js"></script>
+
+  <!-- Add this just before </body> in popup.html -->
+
+  <!-- This is a comment 
+  <hr>
+  <button id="debug-btn" style="width:100%;padding:6px;background:#555;color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;">
+  🛠 Debug — check console
+  </button>
+  <script>
+  document.getElementById('debug-btn').addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ url: "https://www.upwork.com/*" });
+  if (!tab) { alert("No Upwork tab open!"); return; }
+  chrome.tabs.sendMessage(tab.id, { type: "DEBUG_DUMP" }, (result) => {
+    console.log("DEBUG DUMP:", result);
+    alert(
+      "Card counts:\n" + JSON.stringify(result.cardCounts, null, 2) +
+      "\n\nnextDataKeys: " + JSON.stringify(result.nextDataKeys) +
+      "\nresultsCount: " + result.resultsCount +
+      "\nfirstJob: " + JSON.stringify(result.firstJob) +
+      "\n\nCheck DevTools console for full dump."
+      );
+    });
+  });
+</script> -->
 </body>
 </html>

@@ -1,79 +1,108 @@
+// ─── Login check (delegated to background.js which has cookie access) ────────
+
 async function checkLogin() {
   const statusDiv = document.getElementById('auth-status');
-  const loginBtn = document.getElementById('login-btn');
-  const addBtn = document.getElementById('add-btn');
-  const keywordInput = document.getElementById('keyword-input');
-
-  // Find an open Upwork tab
-  const [tab] = await chrome.tabs.query({ url: "https://www.upwork.com/*" });
-
-  if (!tab) {
-    statusDiv.textContent = "Upwork tab not found";
-    statusDiv.className = "status logged-out";
-    showLoginUI(true);
-    return;
-  }
+  const loginBtn  = document.getElementById('login-btn');
+  const addBtn    = document.getElementById('add-btn');
+  const input     = document.getElementById('keyword-input');
 
   try {
-    const response = await chrome.tabs.sendMessage(tab.id, { type: "CHECK_LOGIN_STATUS" });
+    const response = await chrome.runtime.sendMessage({ type: 'CHECK_LOGIN' });
+
     if (response && response.loggedIn) {
-      statusDiv.textContent = "Connected to Upwork";
-      statusDiv.className = "status logged-in";
-      showLoginUI(false);
+      statusDiv.textContent  = "✓ Logged in to Upwork";
+      statusDiv.className    = "logged-in";
+      loginBtn.style.display = "none";
+      addBtn.style.display   = "block";
+      input.style.display    = "block";
     } else {
-      statusDiv.textContent = "Please Log in on the page";
-      statusDiv.className = "status logged-out";
-      showLoginUI(true);
+      throw new Error("not logged in");
     }
-  } catch (e) {
-    statusDiv.textContent = "Please refresh your Upwork tab";
-    showLoginUI(true);
-  }
-}
-
-// Helper to toggle UI
-function showLoginUI(isLoggedOut) {
-  const loginBtn = document.getElementById('login-btn');
-  const addBtn = document.getElementById('add-btn');
-  const keywordInput = document.getElementById('keyword-input');
-
-  if (isLoggedOut) {
+  } catch {
+    statusDiv.textContent  = "✗ Not logged in — scans will be skipped";
+    statusDiv.className    = "logged-out";
     loginBtn.style.display = "block";
-    addBtn.style.display = "none";
-    keywordInput.style.display = "none";
-  } else {
-    loginBtn.style.display = "none";
-    addBtn.style.display = "block";
-    keywordInput.style.display = "block";
+    addBtn.style.display   = "none";
+    input.style.display    = "none";
   }
 }
 
-// Initial Load
-checkLogin();
-chrome.storage.local.get({ keywords: [] }, (result) => {
-  displayKeywords(result.keywords);
-});
+// ─── Timer ───────────────────────────────────────────────────────────────────
 
-// Event listener for the new button
-document.getElementById('login-btn').addEventListener('click', () => {
-  // Using /home is the safest way to trigger the redirect to login or dashboard
-  chrome.tabs.create({ url: 'https://www.upwork.com/home' });
-});
-// 2. Save Keyword to Storage
-document.getElementById('add-btn').addEventListener('click', () => {
-  const input = document.getElementById('keyword-input');
-  const keyword = input.value.trim();
+function startTimer() {
+  const el = document.getElementById('countdown');
 
-  if (keyword) {
-    chrome.storage.local.get({ keywords: [] }, (result) => {
-      const updatedKeywords = [...result.keywords, keyword];
-      chrome.storage.local.set({ keywords: updatedKeywords }, () => {
-        input.value = ''; // Clear input
-        displayKeywords(updatedKeywords);
-      });
+  function tick() {
+    chrome.storage.local.get(['nextScanTimestamp'], (data) => {
+      if (!data.nextScanTimestamp) {
+        el.textContent = 'Pending…';
+        return;
+      }
+      const dist = data.nextScanTimestamp - Date.now();
+      if (dist <= 0) {
+        el.textContent = 'Scanning…';
+        return;
+      }
+      const m = Math.floor(dist / 60000);
+      const s = Math.floor((dist % 60000) / 1000);
+      el.textContent = `${m}:${s < 10 ? '0' + s : s}`;
     });
   }
+
+  tick();
+  setInterval(tick, 1000);
+}
+
+// ─── Scan now button ─────────────────────────────────────────────────────────
+// Sends a message to the background service worker to run a scan immediately.
+
+document.getElementById('scan-now-btn').addEventListener('click', () => {
+  const btn = document.getElementById('scan-now-btn');
+  btn.textContent = 'Scanning…';
+  btn.disabled = true;
+
+  chrome.runtime.sendMessage({ type: 'SCAN_NOW' }, () => {
+    setTimeout(() => {
+      btn.textContent = 'Scan now';
+      btn.disabled = false;
+    }, 3000);
+  });
 });
+
+// ─── Login button ─────────────────────────────────────────────────────────────
+
+document.getElementById('login-btn').addEventListener('click', () => {
+  chrome.tabs.create({ url: 'https://www.upwork.com/home' });
+});
+
+// ─── Add keyword ─────────────────────────────────────────────────────────────
+
+document.getElementById('add-btn').addEventListener('click', addKeyword);
+
+document.getElementById('keyword-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addKeyword();
+});
+
+function addKeyword() {
+  const input   = document.getElementById('keyword-input');
+  const keyword = input.value.trim();
+  if (!keyword) return;
+
+  chrome.storage.local.get({ keywords: [] }, (result) => {
+    // Prevent duplicates
+    if (result.keywords.includes(keyword)) {
+      input.value = '';
+      return;
+    }
+    const updated = [...result.keywords, keyword];
+    chrome.storage.local.set({ keywords: updated }, () => {
+      input.value = '';
+      displayKeywords(updated);
+    });
+  });
+}
+
+// ─── Keyword list ─────────────────────────────────────────────────────────────
 
 function displayKeywords(keywords) {
   const list = document.getElementById('keywordList');
@@ -82,130 +111,95 @@ function displayKeywords(keywords) {
   keywords.forEach((word, index) => {
     const item = document.createElement('div');
     item.className = 'keyword-item';
-    
     item.innerHTML = `
       <span class="keyword-text">${word}</span>
-      <button class="delete-btn" data-index="${index}" title="Remove">X</button>
+      <button class="delete-btn" data-index="${index}" title="Remove">✕</button>
     `;
-
     list.appendChild(item);
   });
 
-  // Add event listeners to all delete buttons
-  document.querySelectorAll('.delete-btn').forEach(button => {
-    button.addEventListener('click', function() {
-      const index = this.getAttribute('data-index');
-      deleteKeyword(index);
-    });
+  list.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteKeyword(Number(btn.dataset.index)));
   });
 }
 
 function deleteKeyword(index) {
   chrome.storage.local.get({ keywords: [] }, (data) => {
-    let keywords = data.keywords;
-    
-    // Remove the specific keyword by its index
-    keywords.splice(index, 1);
-    
-    // Save the updated list back to storage
-    chrome.storage.local.set({ keywords: keywords }, () => {
-      console.log("Keyword deleted.");
-      displayKeywords(keywords); // Refresh the UI
+    data.keywords.splice(index, 1);
+    chrome.storage.local.set({ keywords: data.keywords }, () => {
+      displayKeywords(data.keywords);
     });
   });
 }
 
-chrome.storage.local.get("recentJobs", (data) => {
-  if (data.recentJobs) {
-    displayRecentJobs(data.recentJobs);
-  }
-});
+// ─── Recent jobs ──────────────────────────────────────────────────────────────
 
 function displayRecentJobs(jobs) {
   const container = document.getElementById('recentJobsList');
   container.innerHTML = '';
 
+  if (!jobs || jobs.length === 0) {
+    container.innerHTML = '<div class="no-jobs">No matches yet</div>';
+    return;
+  }
+
   jobs.forEach((job, index) => {
     const div = document.createElement('div');
     div.className = 'recent-item';
-    
     div.innerHTML = `
-      <button class="clear-job-btn" data-index="${index}" title="Clear match">X</button>
-      <div class="job-clickable-area">
-        <strong>${job.title}</strong>
-        <span class="job-time">Found at ${job.time}</span>
+      <button class="clear-job-btn" title="Dismiss">✕</button>
+      <div class="job-title">${job.title}</div>
+      <div class="job-meta">
+        <span class="job-keyword">${job.keyword}</span>
+        ${job.time}
       </div>
     `;
-    
-    // Clicking the text opens the URL
-    div.addEventListener('click', () => {
-      chrome.tabs.create({ url: job.url });
-    });
 
-    // ACTION 2: Click the X to delete the job
-    const deleteBtn = div.querySelector('.clear-job-btn');
-    deleteBtn.addEventListener('click', (e) => {
-      e.stopPropagation(); // CRITICAL: This stops the browser from opening the link!
-      removeNotification(index);
+    div.addEventListener('click', () => chrome.tabs.create({ url: job.url }));
+
+    div.querySelector('.clear-job-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeJob(index);
     });
 
     container.appendChild(div);
   });
 }
 
-function removeNotification(index) {
-  chrome.storage.local.get("recentJobs", (data) => {
-    let recent = data.recentJobs || [];
-    recent.splice(index, 1); // Remove the selected job
-    
-    chrome.storage.local.set({ "recentJobs": recent }, () => {
-      displayRecentJobs(recent); // Refresh the UI
-    });
+function removeJob(index) {
+  chrome.storage.local.get('recentJobs', (data) => {
+    const recent = data.recentJobs || [];
+    recent.splice(index, 1);
+    chrome.storage.local.set({ recentJobs: recent }, () => displayRecentJobs(recent));
   });
 }
+
+// Live-update when background.js saves a new job
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.recentJobs) {
     displayRecentJobs(changes.recentJobs.newValue);
   }
 });
 
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get("recentJobs", (data) => {
-    if (data.recentJobs) {
-      displayRecentJobs(data.recentJobs);
-    }
+  checkLogin();
+  startTimer();
+  checkNoTabWarning();
+
+  chrome.storage.local.get({ keywords: [], recentJobs: [] }, (data) => {
+    displayKeywords(data.keywords);
+    displayRecentJobs(data.recentJobs);
   });
 });
 
-function updateTimer() {
-  const timerElement = document.getElementById("countdown");
-
-  chrome.storage.local.get(["nextScanTimestamp"], (data) => {
-    if (!data.nextScanTimestamp) {
-      timerElement.innerText = "Pending...";
-      return;
+function checkNoTabWarning() {
+  chrome.storage.local.get(["noTabWarning"], (data) => {
+    const statusDiv = document.getElementById("auth-status");
+    if (data.noTabWarning) {
+      statusDiv.textContent = "⚠ Keep an Upwork tab open for scanning";
+      statusDiv.className = "logged-out";
     }
-
-    // Run immediately once, then start interval
-    const runCountdown = () => {
-      const now = Date.now();
-      const distance = data.nextScanTimestamp - now;
-
-      if (distance <= 0) {
-        timerElement.innerText = "00:00";
-        return;
-      }
-
-      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-      // Pad with zeros (e.g., 0:05 instead of 0:5)
-      timerElement.innerText = `${minutes}:${seconds < 10 ? '0' + seconds : seconds}`;
-    };
-
-    runCountdown();
-    setInterval(runCountdown, 1000);
   });
 }
-
-document.addEventListener("DOMContentLoaded", updateTimer);
