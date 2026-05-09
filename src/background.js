@@ -1,7 +1,7 @@
 let notificationUrls = {};
 
 const FRESH_MINUTES = 15;
-const SCAN_INTERVAL = 2;
+const SCAN_INTERVAL = 3;
 
 // --- Startup -----------------------------------------------------------------
 
@@ -60,8 +60,9 @@ async function startJobScan() {
   const tab = tabs[0];
 
   for (const keyword of keywords) {
-    await sleep(800);
+    await sleep(500);
     try {
+      // Content script fetches its own XHR — no tab navigation needed
       const freshJobs = await fetchJobsViaContentScript(tab.id, keyword);
       if (freshJobs.length === 0) {
         console.log("No fresh jobs for: " + keyword);
@@ -75,6 +76,26 @@ async function startJobScan() {
       console.error("Error scanning " + keyword + ": " + err.message);
     }
   }
+}
+
+// --- Wait for tab to finish loading --------------------------------------
+
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      if (tab && tab.status === "complete") {
+        setTimeout(resolve, 1200); // extra wait for JS to render
+        return;
+      }
+      const listener = (id, info) => {
+        if (id === tabId && info.status === "complete") {
+          chrome.tabs.onUpdated.removeListener(listener);
+          setTimeout(resolve, 1200);
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+  });
 }
 
 // --- Delegate fetch to content script ----------------------------------------

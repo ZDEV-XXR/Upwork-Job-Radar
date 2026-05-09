@@ -1,4 +1,6 @@
 // Upwork Radar — content script
+// NO async fetch calls — only reads what's already on the page.
+// This prevents timeout issues entirely.
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -11,13 +13,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === "FETCH_JOBS") {
-    fetchJobs(request.keyword, request.freshMinutes || 15)
+    scrapeCurrentPage(request.keyword, request.freshMinutes || 15)
       .then(jobs => sendResponse(jobs))
-      .catch(err => {
-        console.error("[UpworkRadar] fetch error:", err.message);
-        sendResponse([]);
-      });
-    return true;
+      .catch(() => sendResponse([]));
+    return true; // keep channel open for async
   }
 
   if (request.type === "DEBUG_DUMP") {
@@ -26,131 +25,176 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// ─── Main fetch — 4 layers ───────────────────────────────────────────────────
+// ─── Fetch search page via XHR (synchronous, same-origin, no navigation) ─────
+// XHR with async=false runs in the tab's context so Cloudflare can't block it.
+// No navigation needed — we fetch the HTML directly and parse it.
 
-async function fetchJobs(keyword, freshMinutes) {
+async function scrapeCurrentPage(keyword, freshMinutes) {
   const cutoff = Date.now() - freshMinutes * 60 * 1000;
 
-  // ── Layer 1: Internal REST API ──────────────────────────────────────────────
-  const apiUrl =
-    "https://www.upwork.com/api/profiles/v2/search/jobs/url" +
-    "?q=" + encodeURIComponent(keyword) + "&sort=recency&paging=0;10";
-  try {
-    const res = await fetch(apiUrl, {
-      credentials: "include",
-      headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest", "Referer": location.href }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const jobs = data?.searchResults?.jobs || data?.results || [];
-      console.log("[UpworkRadar] Layer 1 API:", jobs.length, "jobs for:", keyword);
-      if (jobs.length > 0) return strictFilter(jobs, cutoff);
-    } else {
-      console.warn("[UpworkRadar] Layer 1 status:", res.status);
-    }
-  } catch (e) { console.warn("[UpworkRadar] Layer 1 error:", e.message); }
+  const searchUrl = "https://www.upwork.com/nx/search/jobs/?q=" +
+    encodeURIComponent(keyword) + "&sort=recency";
 
-  // ── Layer 2: Fetch search page HTML, parse __NEXT_DATA__ ───────────────────
-  const pageUrl = "https://www.upwork.com/nx/search/jobs/?q=" + encodeURIComponent(keyword) + "&sort=recency";
-  console.log("[UpworkRadar] Layer 2: fetching search page for:", keyword);
   try {
-    const res = await fetch(pageUrl, {
-      credentials: "include",
-      headers: { "Accept": "text/html", "Referer": location.href }
+    // Async XHR wrapped in a Promise — synchronous XHR is blocked in content scripts
+    const html = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", searchUrl, true); // async
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Accept", "text/html");
+      xhr.timeout = 10000;
+      xhr.onload = () => xhr.status === 200 ? resolve(xhr.responseText) : reject(new Error("status " + xhr.status));
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.ontimeout = () => reject(new Error("timeout"));
+      xhr.send();
     });
-    if (res.ok) {
-      const html = await res.text();
-      const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
-      if (m) {
-        const d = JSON.parse(m[1]);
+
+    // Parse the returned HTML as a document
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    // Try __NEXT_DATA__ in the fetched page
+    const nextEl = doc.getElementById("__NEXT_DATA__");
+    if (nextEl) {
+      try {
+        const pageData = JSON.parse(nextEl.textContent);
+        const pp = pageData?.props?.pageProps;
         const results =
-          d?.props?.pageProps?.searchResults?.jobs?.results ||
-          d?.props?.pageProps?.initialData?.jobs?.results ||
-          d?.props?.pageProps?.results || [];
-        console.log("[UpworkRadar] Layer 2:", results.length, "results. pageProps keys:", Object.keys(d?.props?.pageProps || {}));
-        if (results.length > 0) return strictFilter(results, cutoff);
+          pp?.searchResults?.jobs?.results ||
+          pp?.initialData?.jobs?.results ||
+          pp?.results || [];
+
+        console.log("[UpworkRadar] XHR __NEXT_DATA__ results:", results.length, "for:", keyword);
+
+        if (results.length > 0) {
+          const fresh = strictFilter(results, cutoff);
+          if (fresh.length > 0) return fresh;
+          console.log("[UpworkRadar] All results filtered out by freshness for:", keyword);
+          // Log date fields of first job so we can debug
+          if (results[0]) {
+            const dateFields = Object.fromEntries(
+              Object.entries(results[0]).filter(([k]) => /date|time|on$|pub|posted|open|creat/i.test(k))
+            );
+            console.log("[UpworkRadar] First job date fields:", JSON.stringify(dateFields));
+          }
+          return [];
+        }
+        console.log("[UpworkRadar] XHR __NEXT_DATA__ empty. Keys:", Object.keys(pp || {}));
+      } catch(e) {
+        console.warn("[UpworkRadar] XHR __NEXT_DATA__ parse error:", e.message);
       }
-    } else { console.warn("[UpworkRadar] Layer 2 page status:", res.status); }
-  } catch (e) { console.warn("[UpworkRadar] Layer 2 error:", e.message); }
-
-  // ── Layer 3: Read __NEXT_DATA__ from current page DOM ──────────────────────
-  console.log("[UpworkRadar] Layer 3: current page __NEXT_DATA__");
-  const nextEl = document.getElementById("__NEXT_DATA__");
-  if (nextEl) {
-    try {
-      const d = JSON.parse(nextEl.textContent);
-      const results =
-        d?.props?.pageProps?.searchResults?.jobs?.results ||
-        d?.props?.pageProps?.initialData?.jobs?.results ||
-        d?.props?.pageProps?.results || [];
-      const matched = results.filter(j =>
-        (j.title + " " + (j.description || "")).toLowerCase().includes(keyword.toLowerCase())
-      );
-      console.log("[UpworkRadar] Layer 3: matched", matched.length, "of", results.length);
-      if (matched.length > 0) return strictFilter(matched, cutoff);
-    } catch (e) { console.warn("[UpworkRadar] Layer 3 error:", e.message); }
-  }
-
-  // ── Layer 4: DOM scrape visible job cards ──────────────────────────────────
-  console.log("[UpworkRadar] Layer 4: DOM scrape for:", keyword);
-  return domScrape(keyword, cutoff);
-}
-
-// ─── Strict freshness filter ─────────────────────────────────────────────────
-// NEVER accepts a job without a verifiable date — no date = skip.
-
-function strictFilter(jobs, cutoff) {
-  const results = [];
-
-  for (const job of jobs) {
-    // Check all known date field names Upwork uses
-    const raw =
-      job.publishedOn ||
-      job.createdOn   ||
-      job.pubDate     ||
-      job.publishTime ||
-      job.postedOn    ||
-      job.createdDateTime || null;
-
-    if (!raw) {
-      // Log the full key list so we can find the right date field
-      console.warn("[UpworkRadar] Job has NO date field — skipped. Keys:", Object.keys(job), "Title:", job.title);
-      continue;
     }
 
-    const posted = new Date(raw).getTime();
+    // Fallback: parse job tiles from the fetched HTML
+    return scrapeDocForKeyword(doc, keyword, cutoff);
+
+  } catch(e) {
+    console.warn("[UpworkRadar] XHR error:", e.message, "— falling back to current DOM");
+    return scrapeDomForKeyword(keyword, cutoff);
+  }
+}
+
+// ─── Layer 1: __NEXT_DATA__ JSON ─────────────────────────────────────────────
+
+function scrapeNextData(keyword, cutoff) {
+  const el = document.getElementById("__NEXT_DATA__");
+  if (!el) {
+    console.log("[UpworkRadar] No __NEXT_DATA__ on this page");
+    return [];
+  }
+
+  let pageData;
+  try {
+    pageData = JSON.parse(el.textContent);
+  } catch (e) {
+    console.warn("[UpworkRadar] __NEXT_DATA__ parse error:", e.message);
+    return [];
+  }
+
+  const pp = pageData?.props?.pageProps;
+  const results =
+    pp?.searchResults?.jobs?.results ||
+    pp?.initialData?.jobs?.results ||
+    pp?.results ||
+    [];
+
+  if (results.length === 0) {
+    console.log("[UpworkRadar] __NEXT_DATA__ has no results. pageProps keys:", Object.keys(pp || {}));
+    return [];
+  }
+
+  console.log("[UpworkRadar] __NEXT_DATA__ found", results.length, "total jobs");
+
+  const fresh = [];
+  for (const job of results) {
+    const kw = keyword.toLowerCase();
+    const text = ((job.title || "") + " " + (job.description || "")).toLowerCase();
+    if (!text.includes(kw)) continue;
+
+    // Find any date field — log all candidates so we can fix path if needed
+    const dateValue =
+      job.publishedOn       ||
+      job.createdOn         ||
+      job.pubDate           ||
+      job.publishTime       ||
+      job.postedOn          ||
+      job.createdDateTime   ||
+      job.openingDate       ||
+      null;
+
+    if (!dateValue) {
+      // Log the job's keys so we know which field to use
+      console.warn("[UpworkRadar] No date field found. Job keys:", Object.keys(job).join(", "), "| Title:", job.title);
+      continue; // skip — can't verify freshness
+    }
+
+    const posted = new Date(dateValue).getTime();
     if (isNaN(posted)) {
-      console.warn("[UpworkRadar] Unparseable date:", raw, "for:", job.title);
+      console.warn("[UpworkRadar] Unparseable date:", dateValue);
       continue;
     }
 
-    const ageMinutes = Math.round((Date.now() - posted) / 60000);
+    const ageMin = Math.round((Date.now() - posted) / 60000);
     if (posted < cutoff) {
-      console.log("[UpworkRadar] Too old (" + ageMinutes + " min):", job.title);
+      console.log("[UpworkRadar] Too old (" + ageMin + "min):", job.title);
       continue;
     }
 
-    console.log("[UpworkRadar] FRESH (" + ageMinutes + " min):", job.title);
-    results.push({
-      id:    job.ciphertext || job.id || job.jobUid,
-      title: job.title
-    });
+    const id = job.ciphertext || job.id || job.jobUid || null;
+    if (!id || !job.title) continue;
+
+    console.log("[UpworkRadar] FRESH (" + ageMin + "min):", job.title);
+    fresh.push({ id, title: job.title });
   }
 
-  return results.filter(j => j.id && j.title);
+  console.log("[UpworkRadar] __NEXT_DATA__ returned", fresh.length, "fresh job(s) for:", keyword);
+  return fresh;
 }
 
-// ─── DOM scrape ──────────────────────────────────────────────────────────────
-// For DOM scraping we parse the posted-time text strictly.
-// "X minutes ago", "X seconds ago", "X hours ago" → check against cutoff.
-// Anything else (days, weeks, months) → skip.
+// ─── Layer 2a: Scrape a parsed document (from XHR response) ─────────────────
 
-function domScrape(keyword, cutoff) {
+function scrapeDocForKeyword(doc, keyword, cutoff) {
+  const cards = Array.from(doc.querySelectorAll(
+    'article.job-tile, article[data-test="job-tile"], [data-test="job-tile"]'
+  ));
+  console.log("[UpworkRadar] scrapeDoc found", cards.length, "cards");
+  return extractJobsFromCards(cards, keyword, cutoff);
+}
+
+// ─── Layer 2b: Scrape current live DOM ────────────────────────────────────────
+
+function scrapeDomForKeyword(keyword, cutoff) {
+  return scrapeDom(keyword, cutoff);
+}
+
+// ─── Layer 2: DOM scrape ─────────────────────────────────────────────────────
+
+function scrapeDom(keyword, cutoff) {
   const jobs = [];
 
   const cardSelectors = [
-    'article[data-test="job-tile"]',
     'article.job-tile',
+    'article[data-test="job-tile"]',
     '[data-test="job-tile"]',
     'section.air3-card-section',
     '.job-tile'
@@ -160,7 +204,7 @@ function domScrape(keyword, cutoff) {
   for (const sel of cardSelectors) {
     cards = Array.from(document.querySelectorAll(sel));
     if (cards.length > 0) {
-      console.log("[UpworkRadar] DOM: found", cards.length, "cards with:", sel);
+      console.log("[UpworkRadar] DOM found", cards.length, "cards with selector:", sel);
       break;
     }
   }
@@ -169,73 +213,66 @@ function domScrape(keyword, cutoff) {
     console.warn("[UpworkRadar] DOM: no job cards found on:", location.href);
     return [];
   }
+  return extractJobsFromCards(cards, keyword, cutoff);
+}
 
+function extractJobsFromCards(cards, keyword, cutoff) {
+  const jobs = [];
   for (const card of cards) {
-    if (!card.innerText.toLowerCase().includes(keyword.toLowerCase())) continue;
+    const cardText = (card.innerText || card.textContent || "").toLowerCase();
+    if (!cardText.includes(keyword.toLowerCase())) continue;
 
-    // Find the posted time text
-    const timeSelectors = [
-      '[data-test="job-published-date"]',
-      '[data-test="posted-on"]',
-      'small[data-test]', 'time', '.job-tile-header small'
-    ];
+    // Find time text — try selectors first, then regex on full card text
+    // Correct selector confirmed: small.text-light.mb-1 contains "Posted X minutes ago"
+    // Fallback: regex scan full card text
     let timeText = "";
-    for (const sel of timeSelectors) {
-      const el = card.querySelector(sel);
-      if (el) { timeText = el.innerText.trim(); break; }
+    const timeEl = card.querySelector('small.text-light');
+    if (timeEl) {
+      timeText = (timeEl.innerText || timeEl.textContent || "").trim();
     }
-
     if (!timeText) {
-      console.warn("[UpworkRadar] DOM: no time element found — skipping card");
-      continue;
+      // Regex fallback on full card text — catches any format
+      const m = cardText.match(/posted\s+(\d+\s+(?:second|minute|hour|day|week)s?\s+ago)/i);
+      if (m) timeText = m[1];
     }
+    console.log("[UpworkRadar] timeText:", JSON.stringify(timeText), "| keyword:", keyword);
 
-    // Parse "X minutes ago", "X seconds ago", "X hours ago" into ms
+    if (!timeText) { console.warn("[UpworkRadar] no time found — skipping"); continue; }
+
     const ageMs = parseTimeAgo(timeText);
-    if (ageMs === null) {
-      console.log("[UpworkRadar] DOM: unparseable time '" + timeText + "' — skipping");
-      continue;
-    }
+    if (ageMs === null) { console.log("[UpworkRadar] unparseable time:", timeText); continue; }
 
     const posted = Date.now() - ageMs;
     const ageMin = Math.round(ageMs / 60000);
-    if (posted < cutoff) {
-      console.log("[UpworkRadar] DOM: too old (" + ageMin + " min): '" + timeText + "'");
-      continue;
-    }
+    if (posted < cutoff) { console.log("[UpworkRadar] too old (" + ageMin + "min):", timeText); continue; }
 
     const linkEl = card.querySelector("h3 a, h2 a, a[href*='/jobs/']");
     if (!linkEl) continue;
 
-    const title = linkEl.innerText.trim();
+    const title = (linkEl.innerText || linkEl.textContent || "").trim();
     const href  = linkEl.getAttribute("href") || "";
-    const match = href.match(/~[a-zA-Z0-9]+/);
-    if (match && title) {
-      console.log("[UpworkRadar] DOM: FRESH (" + ageMin + " min):", title);
-      jobs.push({ id: match[0], title });
-    }
-  }
+    // Match ~digits in the URL (e.g. ~022052850103764816526)
+    const match = href.match(/~\d+/);
+    if (!match || !title) continue;
 
-  console.log("[UpworkRadar] DOM: found", jobs.length, "fresh job(s) for:", keyword);
+    console.log("[UpworkRadar] FRESH DOM (" + ageMin + "min):", title);
+    jobs.push({ id: match[0], title });
+  }
+  console.log("[UpworkRadar] extractJobsFromCards:", jobs.length, "fresh jobs for:", keyword);
   return jobs;
 }
 
-// Parses "X seconds ago", "X minutes ago", "X hours ago" → milliseconds
-// Returns null for anything that can't be resolved to a number.
+// ─── Parse "X minutes ago" → milliseconds ────────────────────────────────────
+
 function parseTimeAgo(text) {
   const t = text.toLowerCase();
   const num = parseInt(t);
   if (isNaN(num)) return null;
-
   if (t.includes("second")) return num * 1000;
   if (t.includes("minute")) return num * 60 * 1000;
-  if (t.includes("hour"))   return num * 60 * 60 * 1000;
-
-  // "1 day" = 1440 min — outside 15-min window so it will be filtered out,
-  // but we return the value instead of null so it gets properly logged.
-  if (t.includes("day"))    return num * 24 * 60 * 60 * 1000;
-  if (t.includes("week"))   return num * 7 * 24 * 60 * 60 * 1000;
-
+  if (t.includes("hour"))   return num * 3600 * 1000;
+  if (t.includes("day"))    return num * 86400 * 1000;
+  if (t.includes("week"))   return num * 604800 * 1000;
   return null;
 }
 
@@ -252,7 +289,10 @@ function debugDump() {
     timeElSamples: []
   };
 
-  const sels = ['article[data-test="job-tile"]','article.job-tile','[data-test="job-tile"]','section.air3-card-section','.job-tile'];
+  const sels = [
+    'article[data-test="job-tile"]', 'article.job-tile',
+    '[data-test="job-tile"]', 'section.air3-card-section', '.job-tile'
+  ];
   sels.forEach(s => out.cardCounts[s] = document.querySelectorAll(s).length);
 
   const el = document.getElementById("__NEXT_DATA__");
@@ -267,20 +307,23 @@ function debugDump() {
       out.resultsCount = arr.length;
       if (arr[0]) {
         out.firstJobKeys = Object.keys(arr[0]);
-        // Show all fields that look like dates
-        out.firstJobDateFields = Object.entries(arr[0])
-          .filter(([k, v]) => typeof v === "string" && (k.toLowerCase().includes("date") || k.toLowerCase().includes("time") || k.toLowerCase().includes("on") || k.toLowerCase().includes("pub")))
-          .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {});
+        // Show all fields that look date-related
+        out.firstJobDateFields = Object.fromEntries(
+          Object.entries(arr[0]).filter(([k]) =>
+            /date|time|on$|pub|posted|open|creat/i.test(k)
+          )
+        );
       }
     } catch (e) { out.nextDataError = e.message; }
   }
 
-  Array.from(document.querySelectorAll('article[data-test="job-tile"],[data-test="job-tile"]'))
-    .slice(0, 3)
-    .forEach(c => {
-      const t = c.querySelector('[data-test="job-published-date"],[data-test="posted-on"],time,small');
-      out.timeElSamples.push(t ? t.outerHTML : "none");
-    });
+  Array.from(document.querySelectorAll(
+    'article.job-tile, article[data-test="job-tile"], [data-test="job-tile"]'
+  )).slice(0, 3).forEach(c => {
+    // Grab ALL small/time elements inside the card to find the right one
+    const els = Array.from(c.querySelectorAll('small, time, [class*="posted"], [class*="date"], [class*="time"]'));
+    out.timeElSamples.push(els.map(e => e.outerHTML).join(" | ") || "none");
+  });
 
   console.log("[UpworkRadar DEBUG]", JSON.stringify(out, null, 2));
   return out;

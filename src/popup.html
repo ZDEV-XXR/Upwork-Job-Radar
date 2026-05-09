@@ -236,30 +236,8 @@
   <div class="section-title">Latest Matches</div>
   <div id="recentJobsList"></div>
 
+  <button id="debug-btn" style="width:100%;padding:6px;background:#444;color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;margin-top:8px;">🛠 Debug Dump (check console)</button>
+  <div id="debug-out" style="font-size:10px;color:#333;margin-top:6px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow:auto;"></div>
   <script src="popup.js"></script>
-
-  <!-- Add this just before </body> in popup.html -->
-
-  <!-- This is a comment 
-  <hr>
-  <button id="debug-btn" style="width:100%;padding:6px;background:#555;color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;">
-  🛠 Debug — check console
-  </button>
-  <script>
-  document.getElementById('debug-btn').addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({ url: "https://www.upwork.com/*" });
-  if (!tab) { alert("No Upwork tab open!"); return; }
-  chrome.tabs.sendMessage(tab.id, { type: "DEBUG_DUMP" }, (result) => {
-    console.log("DEBUG DUMP:", result);
-    alert(
-      "Card counts:\n" + JSON.stringify(result.cardCounts, null, 2) +
-      "\n\nnextDataKeys: " + JSON.stringify(result.nextDataKeys) +
-      "\nresultsCount: " + result.resultsCount +
-      "\nfirstJob: " + JSON.stringify(result.firstJob) +
-      "\n\nCheck DevTools console for full dump."
-      );
-    });
-  });
-</script> -->
 </body>
 </html>

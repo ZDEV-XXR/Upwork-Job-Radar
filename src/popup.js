@@ -203,3 +203,28 @@ function checkNoTabWarning() {
     }
   });
 }
+
+// ─── Debug button ─────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('debug-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ url: "https://www.upwork.com/*" });
+    if (!tab) { alert("No Upwork tab open!"); return; }
+    chrome.tabs.sendMessage(tab.id, { type: "DEBUG_DUMP" }, (result) => {
+      if (chrome.runtime.lastError || !result) {
+        alert("Error: " + (chrome.runtime.lastError?.message || "no response"));
+        return;
+      }
+      const out = document.getElementById('debug-out');
+      out.textContent =
+        "Cards: " + JSON.stringify(result.cardCounts) + "\n" +
+        "nextDataKeys: " + JSON.stringify(result.nextDataKeys) + "\n" +
+        "resultsCount: " + result.resultsCount + "\n" +
+        "firstJobKeys: " + JSON.stringify(result.firstJobKeys) + "\n" +
+        "dateFields: " + JSON.stringify(result.firstJobDateFields) + "\n" +
+        "timeSamples: " + JSON.stringify(result.timeElSamples);
+      console.log("[UpworkRadar DEBUG]", result);
+    });
+  });
+});
