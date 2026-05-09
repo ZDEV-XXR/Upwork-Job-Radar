@@ -176,6 +176,14 @@ function removeJob(index) {
 
 // Live-update when background.js saves a new job
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.cloudflareBlocked) {
+    const statusDiv = document.getElementById("auth-status");
+    if (changes.cloudflareBlocked.newValue) {
+      showCloudflareStatus(true);
+    } else {
+      checkLogin(); // recheck login status after cloudflare passes
+    }
+  }
   if (area === 'local' && changes.recentJobs) {
     displayRecentJobs(changes.recentJobs.newValue);
   }
@@ -187,12 +195,48 @@ document.addEventListener('DOMContentLoaded', () => {
   checkLogin();
   startTimer();
   checkNoTabWarning();
+  checkCloudflareWarning();
+
+  // Clear all matches button
+  document.getElementById('clear-all-btn')?.addEventListener('click', () => {
+    if (!confirm('Clear all latest matches?')) return;
+    chrome.storage.local.set({ recentJobs: [], notificationUrls: {} }, () => {
+      displayRecentJobs([]);
+    });
+  });
 
   chrome.storage.local.get({ keywords: [], recentJobs: [] }, (data) => {
     displayKeywords(data.keywords);
     displayRecentJobs(data.recentJobs);
   });
 });
+
+function checkCloudflareWarning() {
+  chrome.storage.local.get(["cloudflareBlocked"], (data) => {
+    showCloudflareStatus(data.cloudflareBlocked);
+  });
+}
+
+function showCloudflareStatus(blocked) {
+  const statusDiv = document.getElementById("auth-status");
+  if (blocked) {
+    statusDiv.innerHTML = `
+      ⚠ Cloudflare check needed —
+      <a href="#" id="goto-upwork" style="color:inherit;font-weight:600;text-decoration:underline;">
+        click here to verify
+      </a>
+    `;
+    statusDiv.className = "logged-out";
+    document.getElementById("goto-upwork")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      chrome.tabs.query({ url: "https://www.upwork.com/*" }, (tabs) => {
+        if (tabs.length > 0) chrome.tabs.update(tabs[0].id, { active: true });
+        else chrome.tabs.create({ url: "https://www.upwork.com/nx/search/jobs/?sort=recency" });
+      });
+      window.close(); // close popup so user sees the tab
+    });
+  }
+}
 
 function checkNoTabWarning() {
   chrome.storage.local.get(["noTabWarning"], (data) => {

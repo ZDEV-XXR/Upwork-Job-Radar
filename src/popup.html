@@ -214,6 +214,12 @@
 
   <h3>⚡ Upwork Radar</h3>
 
+
+  <div class="support-container" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px; text-align: center;">
+  
+  <a href='https://ko-fi.com/zdev821925' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
+  </div>
+  
   <div id="auth-status" class="checking">Checking login...</div>
 
   <button id="login-btn">🔑 Open Upwork &amp; Log In</button>
@@ -233,10 +239,13 @@
 
   <hr>
 
-  <div class="section-title">Latest Matches</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+    <div class="section-title" style="margin:0;">Latest Matches</div>
+    <button id="clear-all-btn" title="Clear all matches" style="background:none;border:none;color:#999;font-size:11px;cursor:pointer;padding:2px 6px;border-radius:4px;">✕ Clear all</button>
+  </div>
   <div id="recentJobsList"></div>
 
-  <button id="debug-btn" style="width:100%;padding:6px;background:#444;color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;margin-top:8px;">🛠 Debug Dump (check console)</button>
+ <!--  <button id="debug-btn" style="width:100%;padding:6px;background:#444;color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;margin-top:8px;">🛠 Debug Dump (check console)</button> -->
   <div id="debug-out" style="font-size:10px;color:#333;margin-top:6px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow:auto;"></div>
   <script src="popup.js"></script>
 </body>

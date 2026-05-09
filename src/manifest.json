@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Upwork Job Radar",
-  "version": "1.3",
+  "version": "1.5",
   "description": "Notifies you of new Upwork jobs based on keywords.",
 
   "background": {
@@ -33,6 +33,7 @@
   "permissions": [
     "tabs",
     "storage",
+    "scripting",
     "notifications",
     "alarms"
   ],
